@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 
 import json
-from konlpy.tag import Mecab
+# from konlpy.tag import Mecab
 
 import torch
 from evaluate import decoding_from_result
@@ -44,24 +44,26 @@ def main(parser):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
     model.eval()
+    print(model_config.maxlen)
 
-    while(True):
-        input_text = input("문장을 입력하세요: ")
-        enc_input = torch.tensor(tokenizer.list_of_string_to_arr_of_pad_token_ids([input_text]))
-        dec_input = torch.tensor([[vocab.token2idx[vocab.START_TOKEN]]])
+    # while(True):
+    input_text = list("你在说什么")
+    print(input_text)
+    enc_input = torch.tensor(tokenizer.list_of_string_to_arr_of_pad_token_ids([input_text]))
+    dec_input = torch.tensor([[vocab.token2idx[vocab.START_TOKEN]]])
 
-        for i in range(model_config.maxlen):
-            y_pred = model(enc_input.to(device), dec_input.to(device))
-            y_pred_ids = y_pred.max(dim=-1)[1]
-            if (y_pred_ids[0,-1] == vocab.token2idx[vocab.END_TOKEN]).to(torch.device('cpu')).numpy():
-                decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
-                break
+    for i in range(model_config.maxlen):
+        y_pred = model(enc_input.to(device), dec_input.to(device))
+        y_pred_ids = y_pred.max(dim=-1)[1]
+        if (y_pred_ids[0,-1] == vocab.token2idx[vocab.END_TOKEN]).to(torch.device('cpu')).numpy():
+            decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
+            break
 
-            # decoding_from_result(enc_input, y_pred, tokenizer)
-            dec_input = torch.cat([dec_input.to(torch.device('cpu')), y_pred_ids[0,-1].unsqueeze(0).unsqueeze(0).to(torch.device('cpu'))], dim=-1)
+        # decoding_from_result(enc_input, y_pred, tokenizer)
+        dec_input = torch.cat([dec_input.to(torch.device('cpu')), y_pred_ids[0,-1].unsqueeze(0).unsqueeze(0).to(torch.device('cpu'))], dim=-1)
 
-            if i == model_config.maxlen - 1:
-                decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
+        if i == model_config.maxlen - 1:
+            decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
 
 
 if __name__ == '__main__':

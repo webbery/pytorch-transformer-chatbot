@@ -8,9 +8,11 @@ import pandas as pd
 import itertools
 from pathlib import Path
 from sklearn.model_selection import train_test_split
-from data_utils.vocab_tokenizer import Vocabulary, mecab_token_pos_flat_fn
-from konlpy.tag import Mecab
+# from data_utils.vocab_tokenizer import Vocabulary, mecab_token_pos_flat_fn
+# from konlpy.tag import Mecab
 from data_utils.utils import Config
+import json
+import codecs
 
 
 def load_data(data_path):
@@ -20,9 +22,11 @@ def load_data(data_path):
     :return: list of train_input, train_label, eval_input, eval_label
     """
     # 판다스를 통해서 데이터를 불러온다.
-    data_df = pd.read_csv(data_path, header=0)
+    data_df = pd.read_csv(data_path, header=0, sep='\t')
+    data_df = data_df.dropna()
     # 질문과 답변 열을 가져와 question과 answer에 넣는다.
-    question, answer = list(data_df['Q']), list(data_df['A'])
+    question, answer = list(data_df['question']), list(data_df['answer'])
+    # question, answer = list(data_df['Q']), list(data_df['A'])
     # skleran에서 지원하는 함수를 통해서 학습 셋과
     # 테스트 셋을 나눈다.
     tr_input, val_input, tr_label, val_label = train_test_split(question, answer, test_size=0.05,
@@ -31,12 +35,18 @@ def load_data(data_path):
 
     data_config = Config(json_path='./data_in/config.json')
     with open(data_config.train, mode='w', encoding='utf-8') as io:
+        print('read ',data_config.train)
         for input, label in zip(tr_input, tr_label):
-            text = input+"\t"+label+"\n"
-            io.write(text)
+            try:
+                text = input+"\t"+label+"\n"
+                io.write(text)
+            except:
+                print(input, label)
 
     with open(data_config.validation, mode='w', encoding='utf-8') as io:
+        print('read ',data_config.validation)
         for input, label in zip(val_input, val_label):
+            # print(input,label)
             text = input+"\t"+label+"\n"
             io.write(text)
 
@@ -44,18 +54,43 @@ def load_data(data_path):
     # 그 값을 리턴한다.
     return total_courpus
 
+def gen_token(list_of_str):
+    token2idx={
+        "<pad>": 0,
+        "<s>": 1,
+        "</s>": 2,
+        "<unk>": 3,
+        "[CLS]": 4,
+        "[MASK]": 5,
+        "[SEP]": 6,
+        "[SEG_A]": 7,
+        "[SEG_B]": 8,
+        "<num>": 9
+    }
+    n_tokens = len(token2idx)
+    for sentence in list_of_str:
+        for word in sentence:
+            if word not in token2idx:
+                token2idx[word] = n_tokens
+                n_tokens += 1
+    return token2idx
+
 def main():
     cwd = Path.cwd()
     print("cwd: ", cwd)
-    full_path = cwd / 'data_in/Chatbot_data-master/ChatbotData.csv'
+    full_path = cwd / 'data_in/Chatbot_data-master/new_corpus.csv'
+    # full_path = cwd / 'data_in/Chatbot_data-master/ChatbotData.csv'
     print("full_path: ", full_path)
     total_courpus = load_data(data_path=full_path)
-    print("total_courpus:", total_courpus)
+    # print("total_courpus:", total_courpus)
     print("len(total_courpus): ", len(total_courpus))
 
     # extracting morph in sentences
-    vocab = Vocabulary()
-    token2idx = vocab.build_vocab(list_of_str=total_courpus, threshold=1, vocab_save_path="./data_in/token2idx_vocab.json", split_fn=mecab_token_pos_flat_fn) # Mecab().morphs
+    # vocab = Vocabulary()
+    # token2idx = vocab.build_vocab(list_of_str=total_courpus, threshold=1, vocab_save_path="./data_in/token2idx_vocab.json", split_fn=mecab_token_pos_flat_fn) # Mecab().morphs
+    token2idx = gen_token(total_courpus)
+    with open('./data_in/token2idx_vocab.json', 'w',encoding='utf-8') as file_obj:
+        json.dump(token2idx,file_obj,ensure_ascii=False)
     print("token2idx: ", token2idx)
 
 

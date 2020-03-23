@@ -56,7 +56,14 @@ class Transformer(nn.Module):
         x_enc_embed = torch.einsum('ijk->jik', x_enc_embed)
         x_dec_embed = torch.einsum('ijk->jik', x_dec_embed)
 
-
+        # print('enc_input: ',enc_input)
+        # print('dec_input: ',dec_input)
+        # print('src_key: ', src_key_padding_mask)
+        # print('tgt_key: ', tgt_key_padding_mask)
+        # print('mem_key: ', memory_key_padding_mask)
+        # print('tgt_mask: ', tgt_mask)
+        # print('x_enc_embed: ', x_enc_embed)
+        # print('x_dec_embed: ', x_dec_embed)
         # transformer ref: https://pytorch.org/docs/stable/nn.html#torch.nn.Transformer
         feature = self.transfomrer(src = x_enc_embed,
                                    tgt = x_dec_embed,

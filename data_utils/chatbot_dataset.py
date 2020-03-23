@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os
 import torch
 from sklearn.model_selection import train_test_split
-from tensorflow import keras
+# from tensorflow import keras
 from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
@@ -41,9 +41,13 @@ class ChatbotDataset(Dataset):
             for line in lines:
                 if line == "":
                     continue
-                question_item, answer_item = line.split('\t')
-                question.append(question_item)
-                answer.append(answer_item)
+                try:
+                    question_item, answer_item = line.split('\t')
+                    question.append(question_item)
+                    answer.append(answer_item)
+                except:
+                    print(line)
+                # print('Q: ', question_item, 'A: ',answer_item)
         return question, answer
 
     def load_data(self, data_path, train_val_split=True):

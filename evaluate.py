@@ -1,9 +1,9 @@
 from tqdm import tqdm
 import torch
 from metric import correct_sum
-from chatspace import ChatSpace
+# from chatspace import ChatSpace
 
-spacer = ChatSpace()
+# spacer = ChatSpace()
 
 def evaluate(model, data_loader, metrics, device, tokenizer=None):
     if model.training:
@@ -18,8 +18,8 @@ def evaluate(model, data_loader, metrics, device, tokenizer=None):
         with torch.no_grad():
             y_pred = model(enc_input, dec_input)
 
-            if step % 1000 == 0:
-                decoding_from_result(enc_input, y_pred, dec_output, tokenizer)
+            # if step % 1000 == 0:
+            #     decoding_from_result(enc_input, y_pred, dec_output, tokenizer)
 
             y_pred = y_pred.reshape(-1, y_pred.size(-1))
             dec_output = dec_output.view(-1).long()
@@ -56,7 +56,7 @@ def decoding_from_result(enc_input, y_pred, dec_output=None, tokenizer=None):
     else:
         # 핑퐁의 띄어쓰기 교정기 적용
         pred_str = ''.join([token.split('/')[0] for token in pred_token[0][:-1]])
-        pred_str = spacer.space(pred_str)
+        # pred_str = spacer.space(pred_str)
         print("pred_str: ", pred_str)
         print("")
         return pred_str

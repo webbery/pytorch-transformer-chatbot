@@ -6,7 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 import os
 import json
-from konlpy.tag import Mecab
+# from konlpy.tag import Mecab
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -26,7 +26,28 @@ from data_utils.vocab_tokenizer import Tokenizer, Vocabulary, keras_pad_fn, meca
 np.set_printoptions(suppress=False)
 np.set_printoptions(threshold=sys.maxsize)
 
+# class Tokenizer():
+#     def __init__(self, vocab):
+#         self.token2idx=vocab
+#         self.idx2token = {}
+#         for token, idx in vocab.items():
+#             self.idx2token[idx]=token
 
+#     def list_of_string_to_arr_of_pad_token_ids(self, sentence, add_start_end_token=False):
+#         tokens = []
+#         if add_start_end_token==True:
+#             tokens.append(self.token2idx['<s>'])
+#         for word in sentence:
+#             tokens.append(self.token2idx[word])
+#         if add_start_end_token==True:
+#             tokens.append(self.token2idx['</s>'])
+#         return tokens
+
+#     def decode_token_ids(self,tokens):
+#         sentences = []
+#         for t in tokens:
+#             sentences.append(self.idx2token[t])
+#         return sentences
 
 def main(parser):
     # Config
@@ -49,10 +70,10 @@ def main(parser):
 
     # Train & Val Datasets
     tr_ds = ChatbotDataset(data_config.train, tokenizer.list_of_string_to_arr_of_pad_token_ids)
-    tr_dl = DataLoader(tr_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=4, drop_last=False)
+    tr_dl = DataLoader(tr_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=2, drop_last=False)
 
     val_ds = ChatbotDataset(data_config.validation, tokenizer.list_of_string_to_arr_of_pad_token_ids)
-    val_dl = DataLoader(val_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=4, drop_last=False)
+    val_dl = DataLoader(val_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=2, drop_last=False)
 
     # loss
     loss_fn = nn.CrossEntropyLoss(ignore_index=vocab.PAD_ID) # nn.NLLLoss()
@@ -73,7 +94,7 @@ def main(parser):
 
     # load
     if (model_dir / 'best.tar').exists():
-        print("pretrained model exists")
+        print("pretrained model exists: ",model_dir)
         checkpoint = checkpoint_manager.load_checkpoint('best.tar')
         model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -116,8 +137,8 @@ def main(parser):
 
             # Eval
             if total_step % model_config.summary_step ==0 and total_step != 0:
-                print("train: ")
-                decoding_from_result(enc_input, y_pred_copy, dec_output_copy, tokenizer)
+                # print("train: ")
+                # decoding_from_result(enc_input, y_pred_copy, dec_output_copy, tokenizer)
 
                 model.eval()
                 print("eval: ")

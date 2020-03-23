@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch import nn
-from model.embedding.positional_encoding import PositionalEmbedding
-from model.embedding.token_embedding import TokenEmbedding
+from .positional_encoding import PositionalEmbedding
+from .token_embedding import TokenEmbedding
 
 
 class Embeddings(nn.Module):

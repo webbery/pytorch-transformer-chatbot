@@ -3,7 +3,7 @@ import os
 from tensorflow import keras
 import numpy as np
 from pprint import pprint
-from konlpy.tag import Mecab
+# from konlpy.tag import Mecab
 
 import sys
 import pickle
@@ -14,7 +14,7 @@ from collections import Counter
 from threading import Thread
 from tqdm import tqdm
 
-mecab = Mecab()
+# mecab = Mecab()
 
 class Vocabulary(object):
     """Vocab Class"""
@@ -90,7 +90,7 @@ class Vocabulary(object):
     def __len__(self):
         return len(self.token2idx)
 
-    def build_vocab(self, list_of_str, threshold=1, vocab_save_path="./data_in/token_vocab.json", split_fn=Mecab().morphs):
+    def build_vocab(self, list_of_str, threshold=1, vocab_save_path="./data_in/token_vocab.json", split_fn=list):
         """Build a token vocab"""
 
         def do_concurrent_tagging(start, end, text_list, counter):
@@ -143,11 +143,15 @@ class Vocabulary(object):
 
 
 def mecab_token_pos_flat_fn(string):
-    tokens_ko = mecab.pos(string)
-    return [str(pos[0]) + '/' + str(pos[1]) for pos in tokens_ko]
+    tokens_ko = list(string)
+    # print(tokens_ko)
+    # tokens_ko = mecab.pos(string)
+    return [str(pos[0]) for pos in tokens_ko]
+    # return [str(pos[0]) + '/' + str(pos[1]) for pos in tokens_ko]
 
 def mecab_token_pos_sep_fn(string):
-    tokens_ko = mecab.pos(string)
+    tokens_ko = list(string)
+    # tokens_ko = mecab.pos(string)
     list_of_token = []
     list_of_pos = []
     for token, pos in tokens_ko:
@@ -155,20 +159,24 @@ def mecab_token_pos_sep_fn(string):
         list_of_pos.append(pos)
     return list_of_token, list_of_pos
 
-def mecab_token_fn(string):
-    tokens_ko = mecab.pos(string)
-    return [str(pos[0]) for pos in tokens_ko]
+# def mecab_token_fn(string):
+#     tokens_ko = mecab.pos(string)
+#     return [str(pos[0]) for pos in tokens_ko]
 
-def mecab_pos_fn(string):
-    tokens_ko = mecab.pos(string)
-    return [str(pos[0]) for pos in tokens_ko]
+# def mecab_pos_fn(string):
+#     tokens_ko = mecab.pos(string)
+#     return [str(pos[0]) for pos in tokens_ko]
 
 def keras_pad_fn(token_ids_batch, maxlen, pad_id=0, padding='post', truncating='post'):
+    # print(token_ids_batch)
     padded_token_ids_batch = keras.preprocessing.sequence.pad_sequences(token_ids_batch,
                                                                     value=pad_id,#vocab.transform_token2idx(PAD),
                                                                     padding=padding,
                                                                     truncating=truncating,
                                                                     maxlen=maxlen)
+    # print('------------')
+    # print(padded_token_ids_batch)
+    # print('=============')
     return np.array(padded_token_ids_batch)
 
 
