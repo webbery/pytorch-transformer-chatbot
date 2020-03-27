@@ -261,12 +261,12 @@ class Tokenizer:
     def decode_token_ids(self, token_ids_batch):
         token_token_batch = []
         for token_ids in token_ids_batch:
-            token_token = [self._vocab.transform_idx2token(token_id) for token_id in token_ids]
+            token_token = [self._vocab.transform_idx2token(token_id) for token_id in token_ids if token_id!=self._vocab.PAD_ID]
             # token_token = [self._vocab[token_id] for token_id in token_ids]
             token_token_batch.append(token_token)
         return token_token_batch
 
-        return ' '.join([reverse_token_index.get(i, '?') for i in text])
+        # return ' '.join([reverse_token_index.get(i, '?') for i in text])
 
 
 

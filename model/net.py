@@ -12,14 +12,14 @@ from model.embedding.embeddings import Embeddings
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-class Transformer(nn.Module):
+class TransformerNet(nn.Module):
     def __init__(self, config: Config, vocab: Vocabulary) -> None:
-        """Instantiating Transformer class
+        """Instantiating TransformerNet class
         Args:
             config (Config): model config, the instance of data_utils.utils.Config
             vocab (Vocabulary): the instance of data_utils.vocab_tokenizer.Vocabulary
         """
-        super(Transformer, self).__init__()
+        super(TransformerNet, self).__init__()
         self.vocab = vocab
         d_model = config.d_model #512
         n_head = config.n_head #8

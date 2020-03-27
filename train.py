@@ -1,193 +1,165 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import argparse
-import sys
-import numpy as np
-from pathlib import Path
-from tqdm import tqdm
-import os
-import json
-# from konlpy.tag import Mecab
-
+from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch
-from torch.utils.tensorboard import SummaryWriter
-from torch import nn, optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Dataset, DataLoader, RandomSampler
+from typing import Tuple, List
 
-from evaluate import evaluate, decoding_from_result
-from metric import acc
-from model.net import Transformer
-from model.optim import GradualWarmupScheduler
-
+from model.generator import Generator
+import argparse
+from pathlib import Path
 from data_utils.utils import Config, CheckpointManager, SummaryManager
-from data_utils.chatbot_dataset import ChatbotDataset
-from data_utils.vocab_tokenizer import Tokenizer, Vocabulary, keras_pad_fn, mecab_token_pos_flat_fn
+import json
 
-np.set_printoptions(suppress=False)
-np.set_printoptions(threshold=sys.maxsize)
+from data_utils.vocab_tokenizer import Vocabulary
+from sklearn.model_selection import train_test_split
+from transformers import BertTokenizer, BertModel, AdamW, BertPreTrainedModel,get_linear_schedule_with_warmup,get_cosine_with_hard_restarts_schedule_with_warmup
+import pandas as pd
+from tqdm import tqdm
+import numpy as np
 
-# class Tokenizer():
-#     def __init__(self, vocab):
-#         self.token2idx=vocab
-#         self.idx2token = {}
-#         for token, idx in vocab.items():
-#             self.idx2token[idx]=token
+from model.discriminator import BertDiscriminator
 
-#     def list_of_string_to_arr_of_pad_token_ids(self, sentence, add_start_end_token=False):
-#         tokens = []
-#         if add_start_end_token==True:
-#             tokens.append(self.token2idx['<s>'])
-#         for word in sentence:
-#             tokens.append(self.token2idx[word])
-#         if add_start_end_token==True:
-#             tokens.append(self.token2idx['</s>'])
-#         return tokens
+class GeneratorDatasetReader(Dataset):
+    def __init__(self, dataframe, device, tokenizer, generator):
+        self.device = device
+        self.X = []
+        self.Y = []
+        test_cnt = 0
+        global fileindex
+        fileindex += 1
+        # with open('df'+str(fileindex)+'.cvs','w', encoding='utf8') as f:
+        for i, (row) in tqdm(dataframe.iterrows()):
+            # try:
+            if isinstance(row['question'],str)==False: continue
+            pos_sample = self.__truncate_token__([row['question']+'|'+row['answer']], 120, tokenizer)
+            # pos_sample = self.__truncate_token__(row['question']+'|'+row['answer'], 120, tokenizer)
+            pos_label = [1]
+            text = torch.LongTensor(pos_sample)
+            tags = torch.LongTensor(pos_label)
+            self.X.append(text)
+            self.Y.append(tags)
+            # print(row['answer'])
+            # print(output)
 
-#     def decode_token_ids(self,tokens):
-#         sentences = []
-#         for t in tokens:
-#             sentences.append(self.idx2token[t])
-#         return sentences
+            neg_sample = self.__truncate_token__([row['question']+'|'+output], 120, tokenizer)
+            neg_label = [0]
+            text = torch.LongTensor(neg_sample)
+            tags = torch.LongTensor(neg_label)
+            self.X.append(text)
+            self.Y.append(tags)
+                # except:
+                #     print(row['question'])
+                # test_cnt +=1
+                # if test_cnt>4: break
+        print('generate success.')
+    
+    def __len__(self):
+        return len(self.X)
 
-def main(parser):
-    # Config
-    args = parser.parse_args()
+    def __getitem__(self, index: int) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        return self.X[index], self.Y[index]
+    
+    def __truncate_token__(self, row, minsize=50, tokenizer=None):
+        tokens = []
+        for s in row:
+            if isinstance(s,str)!=True:
+                break
+            # sentence = re.sub(r'[。，?]','',s)
+            sentence = s
+            if len(sentence)>minsize: sentence = sentence[0:minsize]
+            # print(sentence)
+            text = tokenizer.encode(sentence)
+            tokens += text
+        if len(tokens)>512:
+            minsize-=10
+            tokens = self.__truncate_token__(row, minsize, tokenizer)
+        return tokens
+
+def collate_fn(batch: List[Tuple[torch.LongTensor, torch.LongTensor]]) \
+        -> Tuple[torch.LongTensor, torch.LongTensor]:
+    x, y = list(zip(*batch))
+    # print(x)
+    # print(y)
+    x = pad_sequence(x, batch_first=True, padding_value=0)
+    y = torch.stack(y)
+    return x.to(device), y.to(device)
+
+def load_generator(args):
+    # 载入预训练的生成器
     data_dir = Path(args.data_dir)
     model_dir = Path(args.model_dir)
     data_config = Config(json_path=data_dir / 'config.json')
     model_config = Config(json_path=model_dir / 'config.json')
 
-    # Vocab & Tokenizer
+    checkpoint_manager = CheckpointManager(model_dir) # experiments/base_model
+    checkpoint = checkpoint_manager.load_checkpoint('best.tar')
+
     with open(data_config.token2idx_vocab, mode='rb') as io:
         token2idx_vocab = json.load(io)
         print("token2idx_vocab: ", token2idx_vocab)
     vocab = Vocabulary(token2idx = token2idx_vocab)
-    tokenizer = Tokenizer(vocab=vocab, split_fn=mecab_token_pos_flat_fn, pad_fn=keras_pad_fn, maxlen=model_config.maxlen)
     model_config.vocab_size = len(vocab.token2idx)
 
-    # Model & Model Params
-    model = Transformer(config=model_config, vocab=vocab)
+    return Generator(model_config, vocab, checkpoint['model_state_dict'])
 
-    # Train & Val Datasets
-    tr_ds = ChatbotDataset(data_config.train, tokenizer.list_of_string_to_arr_of_pad_token_ids)
-    tr_dl = DataLoader(tr_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=2, drop_last=False)
+def train_generator(gen, data_itr):
+    data_itr = data_itr.sample(frac=0.5)
+    g_steps = 10
+    genenrator.switch_mode('train')
+    for step in range(g_steps):
+        for item in data_itr:
+            print(item)
+            return
+        # gen.gen_output()
 
-    val_ds = ChatbotDataset(data_config.validation, tokenizer.list_of_string_to_arr_of_pad_token_ids)
-    val_dl = DataLoader(val_ds, batch_size=model_config.batch_size, shuffle=True, num_workers=2, drop_last=False)
-
-    # loss
-    loss_fn = nn.CrossEntropyLoss(ignore_index=vocab.PAD_ID) # nn.NLLLoss()
-
-    # optim
-    opt = optim.Adam(params=model.parameters(), lr=model_config.learning_rate) # torch.optim.SGD(params=model.parameters(), lr=model_config.learning_rate)
-    # scheduler = ReduceLROnPlateau(opt, patience=5)  # Check
-    scheduler = GradualWarmupScheduler(opt, multiplier=8, total_epoch=model_config.epochs)
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model.to(device)
-
-    # save
-    # writer = SummaryWriter('{}/runs'.format(model_dir))
-    checkpoint_manager = CheckpointManager(model_dir)
-    summary_manager = SummaryManager(model_dir)
-    best_val_loss = 1e+10
-    best_train_acc = 0
-
-    # load
-    if (model_dir / 'best.tar').exists():
-        print("pretrained model exists: ",model_dir)
-        checkpoint = checkpoint_manager.load_checkpoint('best.tar')
-        model.load_state_dict(checkpoint['model_state_dict'])
-
-    # Train
-    for epoch in tqdm(range(model_config.epochs), desc='epoch', total=model_config.epochs):
-        scheduler.step(epoch)
-        print("epoch : {}, lr: {}".format(epoch, opt.param_groups[0]['lr']))
-        tr_loss = 0
-        tr_acc = 0
-        model.train()
-
-        for step, mb in tqdm(enumerate(tr_dl), desc='steps', total=len(tr_dl)):
-            opt.zero_grad()
-
-            enc_input, dec_input, dec_output = map(lambda elm: elm.to(device), mb)
-            y_pred = model(enc_input, dec_input)
-            y_pred_copy = y_pred.detach()
-            dec_output_copy = dec_output.detach()
-
-            # loss 계산을 위해 shape 변경
-            y_pred = y_pred.reshape(-1, y_pred.size(-1))
-            dec_output = dec_output.view(-1).long()
-
-            # padding 제외한 value index 추출
-            real_value_index = [dec_output != 0]
-
-            # padding은 loss 계산시 제외
-            mb_loss = loss_fn(y_pred[real_value_index], dec_output[real_value_index]) # Input: (N, C) Target: (N)
-            mb_loss.backward()
-            opt.step()
-
-            with torch.no_grad():
-                mb_acc = acc(y_pred, dec_output)
-
-            tr_loss += mb_loss.item()
-            tr_acc = mb_acc.item()
-            tr_loss_avg =  tr_loss / (step + 1)
-            tr_summary = {'loss': tr_loss_avg, 'acc': tr_acc}
-            total_step = epoch * len(tr_dl) + step
-
-            # Eval
-            if total_step % model_config.summary_step ==0 and total_step != 0:
-                # print("train: ")
-                # decoding_from_result(enc_input, y_pred_copy, dec_output_copy, tokenizer)
-
-                model.eval()
-                print("eval: ")
-                val_summary = evaluate(model, val_dl, {'loss': loss_fn, 'acc':acc}, device, tokenizer)
-                val_loss = val_summary['loss']
-
-                # writer.add_scalars('loss', {'train': tr_loss_avg,
-                #                             'val': val_loss}, epoch * len(tr_dl) + step)
-
-                tqdm.write('epoch : {}, step : {}, '
-                           'tr_loss: {:.3f}, val_loss: {:.3f}, tr_acc: {:.2%}, val_acc: {:.2%}'.format(epoch + 1, total_step,
-                                                                            tr_summary['loss'],
-                                                                            val_summary['loss'], tr_summary['acc'],
-                                                                            val_summary['acc']))
-
-                val_loss = val_summary['loss']
-                # is_best = val_loss < best_val_loss # loss 기준
-                is_best = tr_acc > best_train_acc # acc 기준 (원래는 train_acc가 아니라 val_acc로 해야)
-
-                # Save
-                if is_best:
-                    print("[Best model Save] train_acc: {}, train_loss: {}, val_loss: {}".format(tr_summary['acc'], tr_summary['loss'], val_loss))
-                    # CPU에서도 동작 가능하도록 자료형 바꾼 뒤 저장
-                    state = {'epoch': epoch + 1,
-                             'model_state_dict': model.to(torch.device('cpu')).state_dict(),
-                             'opt_state_dict': opt.state_dict()}
-                    summary = {'train': tr_summary, 'validation': val_summary}
-
-                    summary_manager.update(summary)
-                    summary_manager.save('summary.json')
-                    checkpoint_manager.save_checkpoint(state, 'best.tar')
-
-                    best_val_loss = val_loss
-
-                model.to(device)
-                model.train()
-            else:
-                if step % 50 == 0:
-                    print('epoch : {}, step : {}, tr_loss: {:.3f}, tr_acc: {:.2%}'.format(epoch + 1, total_step, tr_summary['loss'], tr_summary['acc']))
-
-
-
-
+def train_discriminator(discriminator, genenrator, real_data):
+    genenrator.switch_mode('eval')
+    data_itr = real_data.sample(frac=0.4)
+    d_steps = 10
+    for d_step in range(d_steps):
+        # 根据真实数据生成负样本
+        inputs = []
+        outputs = []
+        for data in data_itr:
+            print(data)
+            qustion = str(data['question'])
+            inputs.append(qustion)
+            output = genenrator.gen_output(qustion)
+            outputs.append(output)
+        # 开始训练D
+    pass
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', default='data_in', help="Directory containing config.json of data")
     parser.add_argument('--model_dir', default='experiments/base_model',
                         help="Directory containing config.json of model")
 
-    main(parser)
+    args = parser.parse_args()
+
+    generator = load_generator(args)
+    generator.switch_mode()
+
+    data_dir = Path(args.data_dir)
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # 创建正负样本
+    corpus = pd.read_csv(data_dir / 'Chatbot_data-master/new_corpus.csv',engine='python',encoding="utf8", sep='\t')
+    train_df, val_df = train_test_split(corpus, test_size=0.05)
+    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+    # train_dataset = DiscriminatorDatasetReader(train_df, device, tokenizer, generator)
+    # dev_dataset = DiscriminatorDatasetReader(val_df, device, tokenizer, generator)
+
+    # BATCH_SIZE = 4
+    # train_sampler = RandomSampler(train_dataset)
+    # dev_sampler = RandomSampler(dev_dataset)
+    # train_iterator = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, collate_fn=collate_fn)
+    # dev_iterator = DataLoader(dev_dataset, batch_size=BATCH_SIZE, sampler=dev_sampler, collate_fn=collate_fn)
+
+    EPOCH = 2
+    for epoch in range(EPOCH):
+        # g-step
+        train_generator(generator, train_df)
