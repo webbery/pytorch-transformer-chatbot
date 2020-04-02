@@ -22,134 +22,81 @@ from tqdm import tqdm
 import numpy as np
 
 from model.discriminator import BertDiscriminator
+from model.seqgan import DiscriminatorDatasetReader, collate_fn, load_generator, save_generator, train_discriminator, evaluate_discriminator, prepaire_D_dataset, prepaire_D_optimizer, prepaire_D_scheduler
+from model.seqgan import load_discriminator, prepaire_G_dataset, train_generator
 
-class GeneratorDatasetReader(Dataset):
-    def __init__(self, dataframe, device, tokenizer, generator):
-        self.device = device
-        self.X = []
-        self.Y = []
-        test_cnt = 0
-        global fileindex
-        fileindex += 1
-        # with open('df'+str(fileindex)+'.cvs','w', encoding='utf8') as f:
-        for i, (row) in tqdm(dataframe.iterrows()):
-            # try:
-            if isinstance(row['question'],str)==False: continue
-            pos_sample = self.__truncate_token__([row['question']+'|'+row['answer']], 120, tokenizer)
-            # pos_sample = self.__truncate_token__(row['question']+'|'+row['answer'], 120, tokenizer)
-            pos_label = [1]
-            text = torch.LongTensor(pos_sample)
-            tags = torch.LongTensor(pos_label)
-            self.X.append(text)
-            self.Y.append(tags)
-            # print(row['answer'])
-            # print(output)
+from model.optim import GradualWarmupScheduler
 
-            neg_sample = self.__truncate_token__([row['question']+'|'+output], 120, tokenizer)
-            neg_label = [0]
-            text = torch.LongTensor(neg_sample)
-            tags = torch.LongTensor(neg_label)
-            self.X.append(text)
-            self.Y.append(tags)
-                # except:
-                #     print(row['question'])
-                # test_cnt +=1
-                # if test_cnt>4: break
-        print('generate success.')
-    
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, index: int) -> Tuple[torch.LongTensor, torch.LongTensor]:
-        return self.X[index], self.Y[index]
-    
-    def __truncate_token__(self, row, minsize=50, tokenizer=None):
-        tokens = []
-        for s in row:
-            if isinstance(s,str)!=True:
-                break
-            # sentence = re.sub(r'[。，?]','',s)
-            sentence = s
-            if len(sentence)>minsize: sentence = sentence[0:minsize]
-            # print(sentence)
-            text = tokenizer.encode(sentence)
-            tokens += text
-        if len(tokens)>512:
-            minsize-=10
-            tokens = self.__truncate_token__(row, minsize, tokenizer)
-        return tokens
-
-def collate_fn(batch: List[Tuple[torch.LongTensor, torch.LongTensor]]) \
-        -> Tuple[torch.LongTensor, torch.LongTensor]:
-    x, y = list(zip(*batch))
-    # print(x)
-    # print(y)
-    x = pad_sequence(x, batch_first=True, padding_value=0)
-    y = torch.stack(y)
-    return x.to(device), y.to(device)
-
-def load_generator(args):
-    # 载入预训练的生成器
-    data_dir = Path(args.data_dir)
-    model_dir = Path(args.model_dir)
-    data_config = Config(json_path=data_dir / 'config.json')
-    model_config = Config(json_path=model_dir / 'config.json')
-
-    checkpoint_manager = CheckpointManager(model_dir) # experiments/base_model
-    checkpoint = checkpoint_manager.load_checkpoint('best.tar')
-
-    with open(data_config.token2idx_vocab, mode='rb') as io:
-        token2idx_vocab = json.load(io)
-        print("token2idx_vocab: ", token2idx_vocab)
-    vocab = Vocabulary(token2idx = token2idx_vocab)
-    model_config.vocab_size = len(vocab.token2idx)
-
-    return Generator(model_config, vocab, checkpoint['model_state_dict'])
-
-def train_generator(gen, data_itr):
-    data_itr = data_itr.sample(frac=0.5)
-    g_steps = 10
-    genenrator.switch_mode('train')
-    for step in range(g_steps):
-        for item in data_itr:
-            print(item)
-            return
-        # gen.gen_output()
-
-def train_discriminator(discriminator, genenrator, real_data):
+def train_discriminator_with_gen(discriminator, genenrator, real_data):
     genenrator.switch_mode('eval')
     data_itr = real_data.sample(frac=0.4)
-    d_steps = 10
+    d_steps = 2
     for d_step in range(d_steps):
-        # 根据真实数据生成负样本
+        # 构建正负样本数据集
         inputs = []
         outputs = []
         for data in data_itr:
             print(data)
             qustion = str(data['question'])
             inputs.append(qustion)
-            output = genenrator.gen_output(qustion)
-            outputs.append(output)
+            outputs.append(str(data['answer']))
+        corpus = pd.DataFrame({'question':inputs,'answer': outputs}).sample(frac=1)
+        BATCH_SIZE = 8
+        train_iterator, dev_iterator = prepaire_D_dataset(corpus,genenrator, batch=BATCH_SIZE)
         # 开始训练D
-    pass
+        EPOCH_NUM = 2
+        optimizer = prepaire_D_optimizer()
+        scheduler = prepaire_D_scheduler(optimizer, EPOCH_NUM, len(train_iterator))
+        train_discriminator(discriminator, train_iterator, optimizer, scheduler)
+        evaluate_discriminator(discriminator, dev_iterator)
+
+def train_generator_with_discr(generator, discriminator, data_iterator, ignore_padid, tokenizer=None):
+    g_steps = 2
+    for step in range(g_steps):
+        BATCH_SIZE = 8
+        # optim
+        opt = optim.Adam(params=generator.parameters(), lr=generator.learning_rate) # torch.optim.SGD(params=model.parameters(), lr=model_config.learning_rate)
+        # scheduler = ReduceLROnPlateau(opt, patience=5)  # Check
+        epoch_size = generator.config.epochs//2  # 降低一半
+        scheduler = GradualWarmupScheduler(opt, multiplier=8, total_epoch=epoch_size)
+        for epoch in range(epoch_size):
+            scheduler.step(epoch)
+            # 1. generator 生成样本pred[batch_size, seq_len, word_emb]
+            dataset = generator.sample(data_iterator)
+            # 2. discriminator根据样本[batch_size, seq_len]生成奖励[batch_size,reward]
+            D_iterater = prepaire_D_dataset(dataset,generator=None,shuffle=False, default_label=0)
+            print(dataset['question'])
+            rewards = discriminator.reward(D_iterater)
+            # 3. 利用pred[batch_size, seq_len, word_emb], pred[batch_idx][t]表示第batch_idx个句子在0:t-1条件下的log(P(y_t|Y_1:Y_{t-1}))
+            #    然后利用公式计算loss
+            #    for t in [0:seq_len]:
+            #       loss = -pred[batch_idx][t]*Q[batch_idx]
+            #    loss/batch_size
+            G_iterator = prepaire_G_dataset(dataset,tokenizer,shuffle=False,rewards=rewards)
+            loss, acc = train_generator(epoch, generator, G_iterator, opt, discriminator, ignore_padid, tokenizer)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', default='data_in', help="Directory containing config.json of data")
     parser.add_argument('--model_dir', default='experiments/base_model',
-                        help="Directory containing config.json of model")
+                        help="Directory containing config.json of generator model")
+    parser.add_argument('--discriminator_dir', default='experiments/discriminator_model',
+                        help="Directory containing config.json of discriminator model")
 
     args = parser.parse_args()
 
-    generator = load_generator(args)
-    generator.switch_mode()
+    generator, tokenizer, ignore_padid = load_generator(args)
+    # generator.switch_mode()
 
     data_dir = Path(args.data_dir)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    # 创建正负样本
+
+    discriminator = load_discriminator(args)
+
     corpus = pd.read_csv(data_dir / 'Chatbot_data-master/new_corpus.csv',engine='python',encoding="utf8", sep='\t')
-    train_df, val_df = train_test_split(corpus, test_size=0.05)
-    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+    BATCH_SIZE = 2
+    train_iterator, dev_iterator = prepaire_G_dataset(corpus, tokenizer, BATCH_SIZE)
     # train_dataset = DiscriminatorDatasetReader(train_df, device, tokenizer, generator)
     # dev_dataset = DiscriminatorDatasetReader(val_df, device, tokenizer, generator)
 
@@ -162,4 +109,4 @@ if __name__ == '__main__':
     EPOCH = 2
     for epoch in range(EPOCH):
         # g-step
-        train_generator(generator, train_df)
+        train_generator_with_discr(generator, discriminator, train_iterator, ignore_padid, tokenizer)

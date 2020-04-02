@@ -1,28 +1,22 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from torch.utils.data import Dataset, DataLoader, RandomSampler
+from torch.utils.data import Dataset, RandomSampler
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset, DataLoader, RandomSampler
 from typing import Tuple, List
 
 from model.generator import Generator
 import argparse
 from pathlib import Path
 from data_utils.utils import Config, CheckpointManager, SummaryManager
-import json
 
-from data_utils.vocab_tokenizer import Vocabulary
-from sklearn.model_selection import train_test_split
-from transformers import BertTokenizer, BertModel, AdamW, BertPreTrainedModel,get_linear_schedule_with_warmup,get_cosine_with_hard_restarts_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup,get_cosine_with_hard_restarts_schedule_with_warmup
 import pandas as pd
-from tqdm import tqdm
-import numpy as np
 
 from model.discriminator import BertDiscriminator
-from model.seqgan import DiscriminatorDatasetReader, collate_fn, load_generator, save_generator, train_generator, evaluate_generator
+from model.seqgan import DiscriminatorDatasetReader, collate_fn, load_generator, save_generator, train_discriminator, evaluate_discriminator, save_discriminator, prepaire_D_dataset, prepaire_D_optimizer, prepaire_D_scheduler, load_discriminator
 from sklearn.metrics import roc_auc_score,accuracy_score
 
 if __name__ == '__main__':
@@ -33,29 +27,20 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    generator = load_generator(args)
+    generator, _, _ = load_generator(args)
     generator.switch_mode()
 
     data_dir = Path(args.data_dir)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     # 创建正负样本
     corpus = pd.read_csv(data_dir / 'Chatbot_data-master/new_corpus.csv',engine='python',encoding="utf8", sep='\t')
-    train_df, val_df = train_test_split(corpus, test_size=0.05)
-    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
-    train_dataset = DiscriminatorDatasetReader(train_df, device, tokenizer, generator)
-    dev_dataset = DiscriminatorDatasetReader(val_df, device, tokenizer, generator)
-
     BATCH_SIZE = 8
-    train_sampler = RandomSampler(train_dataset)
-    dev_sampler = RandomSampler(dev_dataset)
-    train_iterator = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, collate_fn=collate_fn)
-    dev_iterator = DataLoader(dev_dataset, batch_size=BATCH_SIZE, sampler=dev_sampler, collate_fn=collate_fn)
+    train_iterator, dev_iterator = prepaire_D_dataset(corpus, generator, BATCH_SIZE)
     # train_data = []
     # for x,y in train_iterator:
     #     train_data.append(x.)
 
-    discriminator = BertDiscriminator.from_pretrained('bert-base-chinese').to(device)
-    EPOCH_NUM = 5
+    EPOCH_NUM = 15
 
     losses = []
     val_losses = []
@@ -64,32 +49,42 @@ if __name__ == '__main__':
 
     checkpoint_name='discriminator.pkl'
 
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in discriminator.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in discriminator.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=2e-5, eps=1e-8)
+    optimizer = prepaire_D_optimizer()
 
     print(f"current epoch: {start_epoch}")
     print(len(losses))
     # triangular learning rate, linearly grows untill half of first epoch, then linearly decays 
-    warmup_steps = int(0.5 * len(train_iterator))
-    total_steps = len(train_iterator) * EPOCH_NUM - warmup_steps
-    print(total_steps, warmup_steps)
-    scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps,last_epoch=start_epoch)
+    scheduler = prepaire_D_scheduler(optimizer, EPOCH_NUM, len(train_iterator))
 
     # print(generator.gen_output('你好'))
-
-
+    discriminator = load_discriminator()
+    #  loss
+    # 3     -0.38953
+    # 4     -0.389512736511
+    # 5     -0.38947504
+    #       -0.38959519
+    #       -0.38939564
+    #       -0.389323457
+    #       -0.3896472
+    #       -0.389464639
+    #       -0.3895617
+    #       -0.3896406
+    #       -0.38955125
+    #       -0.3892908
+    history_acc = []
+    last_acc = 0
+    discriminator_dir = args.model_dir + '/../discriminator_model/'
     for i in range(EPOCH_NUM-start_epoch-1):
         print('=' * 50, f"EPOCH {start_epoch+i+1}", '=' * 50)
-        tl = train_generator(discriminator, train_iterator, optimizer, scheduler)
+        tl = train_discriminator(discriminator, train_iterator, optimizer, scheduler)
         losses.append(tl)
-        el,r = evaluate_generator(discriminator, dev_iterator)
+        el,r = evaluate_discriminator(discriminator, dev_iterator)
         print(f"Train loss {tl}")
         print(f"accuracy {r}")
         print(f"Evaluate loss {el}")
+        history_acc.append(r)
         # val_losses.append(l)
         # rocs.append(r)
-        save_generator(discriminator,optimizer,i,checkpoint_name)
+        if last_acc<r:
+            save_discriminator(discriminator,discriminator_dir)
+    print('acc: ', history_acc)

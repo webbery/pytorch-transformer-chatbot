@@ -28,29 +28,6 @@ import pandas as pd
 np.set_printoptions(suppress=False)
 np.set_printoptions(threshold=sys.maxsize)
 
-# class Tokenizer():
-#     def __init__(self, vocab):
-#         self.token2idx=vocab
-#         self.idx2token = {}
-#         for token, idx in vocab.items():
-#             self.idx2token[idx]=token
-
-#     def list_of_string_to_arr_of_pad_token_ids(self, sentence, add_start_end_token=False):
-#         tokens = []
-#         if add_start_end_token==True:
-#             tokens.append(self.token2idx['<s>'])
-#         for word in sentence:
-#             tokens.append(self.token2idx[word])
-#         if add_start_end_token==True:
-#             tokens.append(self.token2idx['</s>'])
-#         return tokens
-
-#     def decode_token_ids(self,tokens):
-#         sentences = []
-#         for t in tokens:
-#             sentences.append(self.idx2token[t])
-#         return sentences
-
 def main(parser):
     # Config
     args = parser.parse_args()

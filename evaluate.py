@@ -60,6 +60,11 @@ def decoding_from_result(enc_input, y_pred, dec_output=None, tokenizer=None):
         # print("")
         return pred_str
 
+def decoding_to_str(enc, tokenizer=None):
+    list_of_input_ids = enc.tolist()
+    input_token = tokenizer.decode_token_ids(list_of_input_ids)
+    return [''.join([token.split('/')[0] for token in input_token[i][:-1]]) for i in range(len(input_token)) ]
+
 def decoding_to_pair(enc_input, y_pred, tokenizer=None):
     list_of_input_ids = enc_input.tolist()
     # y_pred_max = y_pred.max(dim=-1)
