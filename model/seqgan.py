@@ -64,7 +64,7 @@ class DiscriminatorDatasetReader(Dataset):
                 #     print(row['question'])
             # test_cnt +=1
             # if test_cnt>4: break
-        print('generate success.')
+        # print('generate success.')
     
     def __len__(self):
         return len(self.X)
@@ -106,7 +106,7 @@ def load_generator(args):
 
     tokenizer = Tokenizer(vocab=vocab, split_fn=mecab_token_pos_flat_fn, pad_fn=keras_pad_fn, maxlen=model_config.maxlen)
     # loss_fn = nn.CrossEntropyLoss(ignore_index=vocab.PAD_ID)
-    return Generator(model_config, vocab, checkpoint['model_state_dict']), tokenizer, vocab.PAD_ID
+    return Generator(model_config, vocab, checkpoint['model_state_dict']), tokenizer, vocab.PAD_ID, checkpoint_manager
 
 def collate_fn(batch: List[Tuple[torch.LongTensor, torch.LongTensor]]) \
         -> Tuple[torch.LongTensor, torch.LongTensor]:
@@ -228,65 +228,77 @@ def prepaire_D_scheduler(optimizer, epoch_num, train_num):
     # print(total_steps, warmup_steps)
     return get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps,last_epoch=-1)
 
-def train_generator(epoch, generator, iterator, optimizer, discriminator, ignore_padid, tokenizer=None):
+def train_generator(generator, iterator, optimizer, discriminator, ignore_padid, tokenizer=None):
     model = generator.seq2seq
     model.train()
     tr_loss = 0
-    tr_acc = 0
+    # tr_acc = 0
     for step, mb in tqdm(enumerate(iterator), desc='steps', total=len(iterator)):
         optimizer.zero_grad()
         mb_loss = 0
         
         enc_input, _, dec_output, reward = map(lambda elm: elm.to(device), mb)
-        print('[reward]: ', reward.shape)
+        # print('[reward]: ', reward.shape)
         dec_input = torch.full((enc_input.shape[0],1),generator.vocab.token2idx[generator.vocab.START_TOKEN]).long().to(device)
+        skip_row = []
         for i in range(generator.config.maxlen):
-            print('decode input: ',dec_input.shape)
-            print(dec_input)
+            # if i == generator.config.maxlen - 1:
+            #     break
+            # print('decode input: ',dec_input.shape)
+            # print(dec_input)
             y_pred = model(enc_input, dec_input)
-            print('y_pred:',y_pred.shape)
+            # y_pred 第i个预测字符 [batch_size, vocab_size]
+            # print('y_pred:',y_pred.shape)
             y_pred_copy = y_pred.detach()
             y_pred_ids = y_pred_copy.max(dim=-1)[1]
-            if i == generator.config.maxlen - 1:
-                break
 
+            # print('VVVVVVVVVVVV: ', y_pred_ids[:,-1].view(-1,1))
+            # print('2222222222: ', y_pred.shape)
+            y_pred_ids = y_pred_ids[:,-1].view(-1,1)
+            # pred_values.append(y_pred[y_pred_ids[:,-1].view(-1,1)])
             # decoding_from_result(enc_input, y_pred, tokenizer)
-            dec_input = torch.cat([dec_input, y_pred_ids[:,-1].view(-1,1)], dim=1)
+            dec_input = torch.cat([dec_input, y_pred_ids], dim=1)
 
             # 保存训练得到的负样本到数组中, 为训练Discriminator做准备
             if tokenizer is not None:
                 str_input, str_pred = decoding_to_pair(enc_input, y_pred_copy, tokenizer)
-                print('input: ', str_input)
-                print('pred: ',str_pred)
-                print('decinput: ', decoding_to_str(dec_input, tokenizer))
+                # print('input: ', str_input)
+                # print('pred: ',str_pred)
+                # print('decinput: ', decoding_to_str(dec_input, tokenizer))
 
             # y_pred = y_pred.reshape(-1, y_pred.size(-1))
             dec_output = dec_output.view(-1).long()
 
+            
             # padding 제외한 value index 추출
-            real_value_index = [dec_output != 0]
+            # real_value_index = [dec_output != 0]
 
-            print(real_value_index)
-            print('=================')
-            print(y_pred.shape, dec_output.shape)
+            # print(real_value_index)
+            # print('=================')
+            # print(y_pred.shape, dec_output.shape)
             # 根据log(P(y_t|Y_1:Y_{t-1})) * Q来计算loss
             for idx in range(y_pred.shape[0]):
-                mb_loss = -y_pred[idx]*reward[idx] # Input: (N, C) Target: (N)
+                if idx in skip_row: continue
+                if generator.is_end_token(y_pred_ids[idx][0]): skip_row.append(idx)
+                pred_value = y_pred[idx][i][y_pred_ids[idx][0]]
+                # pred_values.append(pred_value)
+                mb_loss = -pred_value*reward[idx] # Input: (N, C) Target: (N)
 
-            print('reward:',reward.shape)
-            print('loss:',mb_loss.shape)
+            # print('reward:',reward.shape)
+            # print('loss:',mb_loss.shape)
         mb_loss.backward()
         optimizer.step()
 
-        with torch.no_grad():
-            mb_acc = acc(y_pred, dec_output)
+        # with torch.no_grad():
+        #     mb_acc = acc(y_pred, dec_output)
 
         tr_loss += mb_loss.item()
-        tr_acc = mb_acc.item()
+        # tr_acc = mb_acc.item()
         tr_loss_avg =  tr_loss / (step + 1)
-        tr_summary = {'loss': tr_loss_avg, 'acc': tr_acc}
-        total_step = epoch * len(iterator) + step
-    return tr_loss/len(iterator), tr_acc
+        tr_summary = {'loss': tr_loss_avg}
+        # total_step = epoch * len(iterator) + step
+        
+    return tr_loss/len(iterator)
 
 
 class SqeGAN():

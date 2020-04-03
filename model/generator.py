@@ -5,6 +5,7 @@ from data_utils.vocab_tokenizer import Tokenizer, Vocabulary, keras_pad_fn, meca
 from evaluate import evaluate, decoding_from_result, decoding_to_pair, decoding_to_str
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 class Generator():
     def __init__(self, config: Config, vocab: Vocabulary, state_dict = None):
@@ -25,11 +26,23 @@ class Generator():
     def parameters(self):
         return self.seq2seq.parameters()
 
+    def get_state_dict(self):
+        state_dict = self.seq2seq.to(torch.device('cpu')).state_dict()
+        self.seq2seq.to(self.device)
+        return state_dict
+
+    def eval(self): self.seq2seq.eval()
+    def train(self): self.seq2seq.train()
+
     def gen_output_with_ids(self, input_ids):
         # dec_input = torch.tensor([[self.vocab.token2idx[self.vocab.START_TOKEN]]])
         dec_input = torch.full((input_ids.shape[0],1),self.vocab.token2idx[self.vocab.START_TOKEN]).long()
         # print(dec_input)
         for i in range(self.config.maxlen):
+            # print('input_ids', input_ids)
+            # print('dec_input', dec_input)
+            # print('device', self.device)
+            # y_pred = self.seq2seq(input_ids, dec_input)
             y_pred = self.seq2seq(input_ids.to(self.device), dec_input.to(self.device))
             y_pred_ids = y_pred.max(dim=-1)[1]
             # if (y_pred_ids[0,-1] == self.vocab.token2idx[self.vocab.END_TOKEN]).to(torch.device('cpu')).numpy():
@@ -47,9 +60,10 @@ class Generator():
             # print(end_indices)
 
             # decoding_from_result(enc_input, y_pred, tokenizer)
-            print('y_pred_ids',y_pred_ids.shape)
-            print(dec_input.shape, y_pred_ids.shape,y_pred.shape)
-            dec_input = torch.cat((dec_input.to(torch.device('cpu')), y_pred_ids[:,-1].view(-1,1).to(torch.device('cpu'))), dim=1)
+            # print('y_pred_ids',y_pred_ids.shape)
+            # print(dec_input.shape, y_pred_ids.shape,y_pred.shape)
+            # dec_input = torch.cat((dec_input.to(torch.device('cpu')), y_pred_ids[:,-1].view(-1,1).to(torch.device('cpu'))), dim=1)
+            dec_input = torch.cat((dec_input.to(self.device), y_pred_ids[:,-1].view(-1,1)), dim=1)
             # print(dec_input)
 
             if i == self.config.maxlen - 1:
@@ -111,10 +125,10 @@ class Generator():
         data_dec_output = []
         question = []
         answer = []
-        preds = []
-        for item in dataset:
+        self.seq2seq.eval()
+        # preds = []
+        for item in tqdm(dataset,desc='sampling'):
             enc_input, dec_input, dec_output = map(lambda elm: elm, item)
-            # print(enc_input.shape)
             pred_ids, pred = self.gen_output_with_ids(enc_input)
             # print(pred.shape)
             output_str = decoding_to_str(pred_ids, self.tokenizer)
@@ -131,11 +145,11 @@ class Generator():
             data_dec_output += dec_output
             question += input_str
             answer += output_str
-            preds += pred
+            # preds += pred
             # data_D_set += discriminator_inputs
             # batch_data.append([enc_input, dec_input, dec_output, discriminator_inputs])
             break
         # print(batch_data)
-        df = pd.DataFrame({'enc_input': data_enc_input, 'dec_input': data_dec_input, 'dec_output': data_dec_output, 'question': question, 'answer': answer, 'pred': preds})
+        df = pd.DataFrame({'enc_input': data_enc_input, 'dec_input': data_dec_input, 'dec_output': data_dec_output, 'question': question, 'answer': answer})
         return df
             

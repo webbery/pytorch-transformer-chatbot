@@ -28,7 +28,7 @@ class TransformerNet(nn.Module):
         dim_feedforward = config.dim_feedforward #2048
         dropout = config.dropout #0.1
 
-        self.input_embedding = Embeddings(config=config, vocab=vocab)
+        self.input_embedding = Embeddings(config=config, vocab=vocab).to(device)
 
         self.transfomrer = torch.nn.Transformer(d_model=d_model,
                              nhead=n_head,

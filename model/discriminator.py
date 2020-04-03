@@ -48,6 +48,6 @@ class BertDiscriminator(BertPreTrainedModel):
                 # mask = (row != 0).float()
                 ls, q = self.forward(row[0])
                 q = q.cpu().detach().numpy()
-                print(ls, q[:,0])
+                # print(ls, q[:,0])
                 Q += q[:,label].tolist()
         return Q

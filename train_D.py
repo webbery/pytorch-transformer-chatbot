@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    generator, _, _ = load_generator(args)
+    generator, _, _, _ = load_generator(args)
     generator.switch_mode()
 
     data_dir = Path(args.data_dir)
