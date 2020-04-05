@@ -125,11 +125,12 @@ class Generator():
         data_dec_output = []
         question = []
         answer = []
+        labels = []
         self.seq2seq.eval()
         # preds = []
         for item in tqdm(dataset,desc='sampling'):
             enc_input, dec_input, dec_output = map(lambda elm: elm, item)
-            pred_ids, pred = self.gen_output_with_ids(enc_input)
+            pred_ids, _ = self.gen_output_with_ids(enc_input)
             # print(pred.shape)
             output_str = decoding_to_str(pred_ids, self.tokenizer)
             input_str = decoding_to_str(enc_input, self.tokenizer)
@@ -145,11 +146,23 @@ class Generator():
             data_dec_output += dec_output
             question += input_str
             answer += output_str
+            labels += [0 for _ in range(len(output_str))]
             # preds += pred
             # data_D_set += discriminator_inputs
             # batch_data.append([enc_input, dec_input, dec_output, discriminator_inputs])
-            break
+            data_enc_input += enc_input
+            data_dec_input += dec_input
+            data_dec_output += dec_output
+            question += input_str
+            answer_str = decoding_to_str(dec_input, self.tokenizer)
+            # print('*********************')
+            # print(answer_str)
+            answer += answer_str
+            labels += [1 for _ in range(len(output_str))]
+            # break
         # print(batch_data)
-        df = pd.DataFrame({'enc_input': data_enc_input, 'dec_input': data_dec_input, 'dec_output': data_dec_output, 'question': question, 'answer': answer})
+        # print(len(labels), len(answer))
+        # print(labels, answer)
+        df = pd.DataFrame({'enc_input': data_enc_input, 'dec_input': data_dec_input, 'dec_output': data_dec_output, 'question': question, 'answer': answer, 'label': labels})
         return df
             

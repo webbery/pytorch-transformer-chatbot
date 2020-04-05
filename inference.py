@@ -9,7 +9,7 @@ import json
 
 import torch
 from evaluate import decoding_from_result
-from model.net import Transformer
+from model.net import TransformerNet
 
 from data_utils.utils import Config, CheckpointManager, SummaryManager
 from data_utils.vocab_tokenizer import Tokenizer, Vocabulary, keras_pad_fn, mecab_token_pos_flat_fn
@@ -36,7 +36,7 @@ def main(parser):
     model_config.vocab_size = len(vocab.token2idx)
 
     # Model
-    model = Transformer(config=model_config, vocab=vocab)
+    model = TransformerNet(config=model_config, vocab=vocab)
     checkpoint_manager = CheckpointManager(model_dir) # experiments/base_model
     checkpoint = checkpoint_manager.load_checkpoint('best.tar')
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -47,24 +47,26 @@ def main(parser):
     print(model_config.maxlen)
 
     # while(True):
-    input_text = list("你在说什么")
+    input_text = list("你好呀")
     print(input_text)
     enc_input = torch.tensor(tokenizer.list_of_string_to_arr_of_pad_token_ids([input_text]))
     dec_input = torch.tensor([[vocab.token2idx[vocab.START_TOKEN]]])
 
+    out_str = ''
     for i in range(model_config.maxlen):
         y_pred = model(enc_input.to(device), dec_input.to(device))
         y_pred_ids = y_pred.max(dim=-1)[1]
+        print(y_pred_ids)
         if (y_pred_ids[0,-1] == vocab.token2idx[vocab.END_TOKEN]).to(torch.device('cpu')).numpy():
-            decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
+            out_str = decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
             break
 
         # decoding_from_result(enc_input, y_pred, tokenizer)
         dec_input = torch.cat([dec_input.to(torch.device('cpu')), y_pred_ids[0,-1].unsqueeze(0).unsqueeze(0).to(torch.device('cpu'))], dim=-1)
 
         if i == model_config.maxlen - 1:
-            decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
-
+            out_str = decoding_from_result(enc_input=enc_input, y_pred=y_pred, tokenizer=tokenizer)
+    print(len(out_str), out_str)
 
 if __name__ == '__main__':
 

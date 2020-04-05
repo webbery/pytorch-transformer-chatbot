@@ -56,6 +56,7 @@ class Vocabulary(object):
             self.idx = len(token2idx) - 1
 
         self.PAD_ID = self.transform_token2idx(self.PAD)
+        self.START_TOKEN_ID = 1
 
     def init_vocab(self):
         for special_token in self.special_tokens:
@@ -267,8 +268,16 @@ class Tokenizer:
         return token_token_batch
 
         # return ' '.join([reverse_token_index.get(i, '?') for i in text])
-
-
+    
+    def decode_token_ids_without_tag(self, token_ids_batch):
+        token_token_batch = []
+        for token_ids in token_ids_batch:
+            token_token = [self._vocab.transform_idx2token(token_id) for token_id in token_ids if token_id!=self._vocab.PAD_ID]
+            # token_token = [self._vocab[token_id] for token_id in token_ids]
+            token_token_batch.append(token_token)
+        # print(token_token_batch)
+        # print(token_ids_batch)
+        return token_token_batch
 
 def main():
     print(mecab_token_pos_sep_fn("안녕하세요"))

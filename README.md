@@ -5,10 +5,10 @@ Simple Chinese Generative Chatbot Implementation based on new PyTorch Transforme
 ![transformer_fig](./assets/transformer_fig.png)
 
 ### ToDo
+- Dynamic Memory Networks
 - Beam Search
 - Search hyperparams
 - Attention Visualization
-- Char-level transformer
 
 ```python
 def forward(self, enc_input: torch.Tensor, dec_input: torch.Tensor) -> torch.Tensor:

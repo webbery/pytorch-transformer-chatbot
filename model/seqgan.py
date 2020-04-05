@@ -23,7 +23,7 @@ from evaluate import decoding_to_pair, decoding_to_str
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 class DiscriminatorDatasetReader(Dataset):
-    def __init__(self, dataframe, device, tokenizer, generator=None, default_label=1):
+    def __init__(self, dataframe, device, tokenizer, generator=None):
         self.device = device
         self.X = []
         self.Y = []
@@ -31,6 +31,7 @@ class DiscriminatorDatasetReader(Dataset):
         # global fileindex
         # fileindex += 1
         # with open('df'+str(fileindex)+'.cvs','w', encoding='utf8') as f:
+        has_label = list(dataframe).__contains__('label')
         for i, (row) in tqdm(dataframe.iterrows()):
             # try:
             if isinstance(row['question'],str)==False: continue
@@ -38,20 +39,24 @@ class DiscriminatorDatasetReader(Dataset):
             if generator is not None:
                 output = generator.gen_output(row['question'])
                 if output==row['answer']: continue
-
-                neg_sample = self.__truncate_token__([row['question']+'|'+output], 120, tokenizer)
-                neg_label = [0]
-                text = torch.LongTensor(neg_sample)
-                tags = torch.LongTensor(neg_label)
+                # print('---NEG-------')
+                sample = self.__truncate_token__([row['question']+'|'+output], 120, tokenizer)
+                label = [0]
+                text = torch.LongTensor(sample)
+                tags = torch.LongTensor(label)
                 self.X.append(text)
                 self.Y.append(tags)
             # print('A: ', row['answer'])
             # f.write(row['question']+'|'+row['answer']+'\t1\n')
             # f.write(row['question']+'|'+output+'\t0\n')
 
+            # print('---POS-------')
             pos_sample = self.__truncate_token__([row['question']+'|'+row['answer']], 120, tokenizer)
             # pos_sample = self.__truncate_token__(row['question']+'|'+row['answer'], 120, tokenizer)
-            pos_label = [default_label]
+            if has_label:
+                pos_label = [row['label']]
+            else:
+                pos_label = [1]
             text = torch.LongTensor(pos_sample)
             tags = torch.LongTensor(pos_label)
             self.X.append(text)
@@ -178,7 +183,7 @@ def load_discriminator(args=None):
     model = BertDiscriminator.from_pretrained('bert-base-chinese').to(device)
     return model.from_pretrained(model_path).to(device)
 
-def prepaire_D_dataset(corpus, generator=None, batch = 8, shuffle=True, default_label=1):
+def prepaire_D_dataset(corpus, generator=None, batch = 8, shuffle=True):
     tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
     if shuffle==True:
         train_df, val_df = train_test_split(corpus, test_size=0.05)
@@ -191,7 +196,7 @@ def prepaire_D_dataset(corpus, generator=None, batch = 8, shuffle=True, default_
         dev_iterator = DataLoader(dev_dataset, batch_size=batch, sampler=dev_sampler, collate_fn=collate_fn)
         return train_iterator, dev_iterator
     else:
-        all_dataset = DiscriminatorDatasetReader(corpus, device, tokenizer, generator, default_label=default_label)
+        all_dataset = DiscriminatorDatasetReader(corpus, device, tokenizer, generator)
         all_sampler = SequentialSampler(all_dataset)
         all_iterator = DataLoader(all_dataset, batch_size=batch, sampler=all_sampler, collate_fn=collate_fn)
         return all_iterator
@@ -232,7 +237,7 @@ def train_generator(generator, iterator, optimizer, discriminator, ignore_padid,
     model = generator.seq2seq
     model.train()
     tr_loss = 0
-    # tr_acc = 0
+    tr_acc = 0
     for step, mb in tqdm(enumerate(iterator), desc='steps', total=len(iterator)):
         optimizer.zero_grad()
         mb_loss = 0
@@ -289,29 +294,15 @@ def train_generator(generator, iterator, optimizer, discriminator, ignore_padid,
         mb_loss.backward()
         optimizer.step()
 
-        # with torch.no_grad():
-        #     mb_acc = acc(y_pred, dec_output)
+        with torch.no_grad():
+            y_pred = y_pred.reshape(-1, y_pred.size(-1))
+            # print(y_pred.shape, dec_output.shape)
+            mb_acc = acc(y_pred, dec_output)
 
         tr_loss += mb_loss.item()
-        # tr_acc = mb_acc.item()
+        tr_acc += mb_acc.item()
         tr_loss_avg =  tr_loss / (step + 1)
         tr_summary = {'loss': tr_loss_avg}
         # total_step = epoch * len(iterator) + step
         
-    return tr_loss/len(iterator)
-
-
-class SqeGAN():
-    def __init__(self, opt):
-        self.generator = Generator(opt.gen_config, opt.vocab)
-
-    def train(self, epoch, corpus):
-        # 1. Initialize Gθ, Dφ with random weights θ, φ.
-
-        # 2. Pre-train Gθ using MLE on S
-        # 3. Generate negative samples using Gθ for training Dφ
-        # 4. Pre-train Dφ via minimizing the cross entropy
-        for i in range(epoch):
-            # 5. g steps.
-            print('epoch {i}')
-            # 6. d steps.
+    return tr_loss/len(iterator), tr_acc/len(iterator)

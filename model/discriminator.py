@@ -36,7 +36,7 @@ class BertDiscriminator(BertPreTrainedModel):
             loss = criterion(cls_output, torch.squeeze(labels))
         return loss, cls_output
 
-    def reward(self, targets, label = 0):
+    def reward(self, targets, label = 1):
         # 根据generator生成的target来预测奖励，预测越接近1, 奖励越高
         # print(targets.shape)
         self.eval()
